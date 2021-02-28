@@ -9,7 +9,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 from complexLayers import ComplexBatchNorm1d, ComplexBatchNorm2d, ComplexConv2d, ComplexLinear
-from cplxmodule.nn import CplxBatchNorm1d, RealToCplx, CplxToReal, CplxLinear
+#from cplxmodule.nn import CplxBatchNorm1d, RealToCplx, CplxToReal, CplxLinear
 from complexFunctions import complex_relu, complex_max_pool2d
 import cmath  
 import time
