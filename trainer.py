@@ -143,8 +143,12 @@ def train(sequence_len = 5000, epochs = 25, lr=1e-3, features = 2):
   
   torch.save(net.state_dict(), 'net.model')
   plt.plot(losses)
+  plt.xlabel('Epoch')
+  plt.ylabel('Loss')
   plt.show()
   plt.plot(accuracies)
+  plt.xlabel('Epoch')
+  plt.ylabel('Accuracy')
   plt.show()
   return net
 
