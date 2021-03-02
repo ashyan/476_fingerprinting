@@ -12,10 +12,17 @@ class DeviceDataset(Dataset):
             sequences = []
             for i in range(0, len(device), seq_len*num_features):
               select = device[i:i+(seq_len*num_features)]
+            #  if len(select) == seq_len*num_features*decimation:
+            #    for j in range(decimation):
+            #      curr = [select[i] for i in range(j, len(select),decimation)]
+            #      sequences.append((curr,target[index]))
+            
+              sequences.append((select,target[index]))
+                
               #scaler.fit(select)
               #normalized = scaler.transform(select)
               #sequences.append((normalized,target[index]))
-              sequences.append((select,target[index]))
+              
             
             if len(sequences[-1][0]) != seq_len*num_features:
               sequences=sequences[:-1]

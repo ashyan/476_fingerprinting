@@ -14,6 +14,7 @@ from complexFunctions import complex_relu, complex_max_pool2d
 import cmath  
 import time
 
+torch.autograd.set_detect_anomaly(True)
 torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
 class Net(nn.Module):
@@ -21,54 +22,79 @@ class Net(nn.Module):
       super(Net, self).__init__()
       self.sequences = sequences
       self.features = features
-      self.bn0 = ComplexBatchNorm1d(self.sequences)
-      self.bn1 = BatchNorm1d(self.sequences)
-      self.bn2 = BatchNorm1d(self.sequences)
-      self.bn3 = BatchNorm1d(self.sequences)
+      self.hidden_size = 20
+      self.bn0 = BatchNorm2d(self.sequences)
+      self.bn1 = BatchNorm2d(self.sequences)
+      self.bn2 = BatchNorm2d(self.sequences)
+      self.bn3 = BatchNorm2d(self.sequences)
       self.lin1 = ComplexLinear(self.features, self.features)
-      self.lstm1 = nn.LSTM(features, 1, 1, batch_first = True)
-      self.lstm2 = nn.LSTM(features, 1, 1, batch_first = True)
-      self.lin2 = ComplexLinear(self.sequences, self.sequences)
-      self.output_gate_lin = nn.Linear(self.sequences*2,devices)
+      self.lstm1 = nn.LSTM(features, self.hidden_size, 1, batch_first = True)
+      self.lstm2 = nn.LSTM(features, self.hidden_size, 1, batch_first = True)
+      self.lin2 = ComplexLinear(self.hidden_size, self.hidden_size)
+      self.output_gate_lin = nn.Linear(self.sequences*self.hidden_size*2,devices)
       self.crelu = complex_relu
       self.relu = nn.ReLU()
       self.soft_out = nn.Softmax(dim = 1)
 
-  def forward(self, x, batch):
+  def forward(self, x, batch,hidden1=(None,None),hidden2=(None,None)):
       # x : batch_len X self.time X NUM_FEATURES
       #print("0",x)
-      #x = self.bn0(x)
+      h1,c1 = hidden1
+      h2,c2 = hidden2
+      
+      x = torch.view_as_real(x)
+      x = self.bn0(x)
+      x = torch.view_as_complex(x)
+      
       #print(x)
       x = self.lin1(x)
+      x = self.crelu(x)
       #print("1",x)
       #x = self.relu(x)
-      x = self.crelu(x)
       #print("2",x)
-      #x = self.bn1(x)
-      #x = torch.view_as_real(x).view((batch,sequence_len,self.features*2))
-      x1 = x.real.view((batch,self.sequences,self.features))
-      x2 = x.imag.view((batch,self.sequences,self.features))
-      x1,(_,_) = self.lstm1(x1)
-      x2,(_,_) = self.lstm2(x2)
-      #x2 = torch.view_as_complex(x2)
-      x = torch.stack((x1,x2), dim = -1).squeeze()
+      
+      x = torch.view_as_real(x)
+      x = self.bn1(x)
       x = torch.view_as_complex(x)
+      
+      dec1 = x[:,:,::2]
+      dec2 = x[:,:,1::2]
+      
+      x1 = torch.stack((dec1.real,dec2.real), dim = -1).view((batch,self.sequences,self.features))
+      x2 = torch.stack((dec1.imag,dec2.imag), dim = -1).view((batch,self.sequences,self.features))
+      
+      if h1!= None:
+        x1,(h1,c1) = self.lstm1(x1,(h1,c1))
+        x2,(h2,c2) = self.lstm2(x2,(h2,c2))
+      else:
+        x1,(h1,c1) = self.lstm1(x1)
+        x2,(h2,c2) = self.lstm2(x2)
+      
+      x = torch.stack((x1,x2), dim = -1)
+      
+      x = torch.view_as_complex(x).view((batch,self.sequences,self.hidden_size))
       #print("3",x)
-      #x = self.bn2(x)
+      
+      x = torch.view_as_real(x)
+      x = self.bn2(x)
+      x = torch.view_as_complex(x)
       # batch X time x assets*time
+      
       x = self.lin2(x)
       x = self.crelu(x)
-      x = torch.view_as_real(x).reshape((batch,self.sequences*2))
+      
+      x = torch.view_as_real(x)
+      x = self.bn3(x)
+      
+      x = x.reshape((batch,self.sequences*self.hidden_size*2))
       x = self.output_gate_lin(x)
       #print("4",x)
       x = self.soft_out(x)
-      return x
+      return x,(h1,c1),(h2,c2)
 
 def data_maker(seq_len, batch_size, num_features):
-  #days = ['Day 1', 'Day 2', 'Day 3']
-  #devices = ['Device 1', 'Device 2', 'Device 3']
   days = ['Day 1', 'Day 2', 'Day 3']
-  devices = ['Device 1', 'Device 2']
+  devices = ['Device 1', 'Device 2', 'Device 3']
   raw = []
   for device in devices:
     curr_device = np.array([])
@@ -93,12 +119,13 @@ def data_maker(seq_len, batch_size, num_features):
 device = torch.device("cuda:0")
 
 def train(sequence_len = 5000, epochs = 25, lr=1e-3, features = 2):
-  net = Net(sequence_len, features, 2).to(device=device)
+  net = Net(sequence_len, features, len(data[0][1])).to(device=device)
   optimizer = optim.Adam(net.parameters(), lr=lr, weight_decay = 0)
   loss_fn = nn.CrossEntropyLoss()
   
   losses = []
   accuracies = []
+  training_accs = []
   for epoch in range(epochs):
     curr_losses = []
     curr_percent = (epoch/epochs) * 100
@@ -106,19 +133,24 @@ def train(sequence_len = 5000, epochs = 25, lr=1e-3, features = 2):
     data_percent = 1/len(data)
     every_ten = int(.1/data_percent)
     print("every_ten: {}".format(every_ten))
+    hidden1,hidden2 = (None,None),(None,None)
     start = time.time()
     for i,data_point in enumerate(data):
       samp, targets = data_point
       #samp =  torch.view_as_real(sample).type(torch.FloatTensor).view(batch_size, sequence_len, 2).to(device=device)
       #samp = torch.view_as_real(torch.tensor(samp)).type(torch.FloatTensor).to(device=device)
-      samp = samp.to(device=device).view(batch_size, sequence_len, features)
+      samp = samp.to(device=device).view(samp.shape[0], sequence_len, features)
       targets = targets.to(device=device)
       
-      out = net.forward(samp, len(samp))
+      out,hidden1,hidden2 = net.forward(samp, len(samp),hidden1,hidden2)
+      
+      hidden1 = tuple([each.data for each in hidden1])
+      hidden2 = tuple([each.data for each in hidden2])
+      
       #print(out, targets)
       loss = loss_fn(out,targets)
       optimizer.zero_grad()
-      loss.backward()
+      loss.backward(retain_graph=True)
       optimizer.step()
       #print("loss:", loss.item(), loss)
       curr_losses.append(loss.item())
@@ -142,34 +174,62 @@ def train(sequence_len = 5000, epochs = 25, lr=1e-3, features = 2):
       samp = samp.to(device=device).view(samp.shape[0], sequence_len, features)
       targets = targets.to(device=device)
       with torch.no_grad():
-        out = net.forward(samp, len(samp))
+        out,_,_ = net.forward(samp, samp.shape[0])
         predictions = np.argmax(out.tolist(),axis=1)
         for j,prediction in enumerate(predictions):
           if prediction == targets[j]:
             correct += 1
     accuracy = correct/(len(data.test) * batch_size)
-    print("accuracy:", accuracy)
     accuracies.append(accuracy)
+    print("validation accuracy:", accuracy)
+    correct = 0
+    for sample in data:
+      samp, targets = sample
+      samp = samp.to(device=device).view(samp.shape[0], sequence_len, features)
+      targets = targets.to(device=device)
+      with torch.no_grad():
+        out,_,_ = net.forward(samp, samp.shape[0])
+        predictions = np.argmax(out.tolist(),axis=1)
+        for j,prediction in enumerate(predictions):
+          if prediction == targets[j]:
+            correct += 1
+    accuracy = correct/(len(data) * batch_size)
+    training_accs.append(accuracy)
+    print("training accuracy:", accuracy)
     print('-----------------------------------------------')
   
   torch.save(net.state_dict(), 'net.model')
   plt.plot(losses)
+  plt.title('Loss Per Epoch lr={}'.format(lr))
   plt.xlabel('Epoch')
   plt.ylabel('Loss')
-  plt.show()
+  plt.savefig('plots/loss_{}.png'.format(lr))
+  plt.clf()
+  
   plt.plot(accuracies)
+  plt.title('Validation Accuracy,lr={}'.format(lr))
   plt.xlabel('Epoch')
   plt.ylabel('Accuracy')
-  plt.show()
-  return net
+  plt.savefig('plots/acc_{}.png'.format(lr))
+  plt.clf()
+  
+  #plt.plot(training_accs)
+  #plt.title('Training Accuracy,lr={}'.format(lr))
+  #plt.xlabel('Epoch')
+  #plt.ylabel('Accuracy')
+  #plt.show(block=False)
+  return net,accuracies
 
 sequence_len = 1024
 batch_size = 10
 num_features = 100
 data = data_maker(sequence_len, batch_size,num_features)
-net = train(epochs = 10, sequence_len = sequence_len, lr = 5e-4, features = num_features)
+acc_dict = {}
+for lr in [1e-5,5e-4,1e-4]:
+  net, accuracies = train(epochs = 25, sequence_len = sequence_len, lr = lr, features = num_features)
+  acc_dict[lr] = accuracies
 
-
+print(acc_dict)
 #m = nn.BatchNorm1d(20)
 #print(data[0][0])
 #samp = torch.view_as_real(data[0][0]).view((5,20))
