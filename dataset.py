@@ -5,19 +5,19 @@ from sklearn.preprocessing import MinMaxScaler
 torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
 class DeviceDataset(Dataset):
-    def __init__(self, inputs, target, seq_len, batch_size):
+    def __init__(self, inputs, target, seq_len, batch_size, num_features = 100):
         self.samples = []
         scaler = MinMaxScaler()
         for index,device in enumerate(inputs):
             sequences = []
-            for i in range(0, len(device), seq_len):
-              select = device[i:i+seq_len]
+            for i in range(0, len(device), seq_len*num_features):
+              select = device[i:i+(seq_len*num_features)]
               #scaler.fit(select)
               #normalized = scaler.transform(select)
               #sequences.append((normalized,target[index]))
               sequences.append((select,target[index]))
             
-            if len(sequences[-1][0]) != seq_len:
+            if len(sequences[-1][0]) != seq_len*num_features:
               sequences=sequences[:-1]
             self.samples.extend(sequences)
         random.shuffle(self.samples)

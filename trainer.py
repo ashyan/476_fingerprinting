@@ -23,12 +23,13 @@ class Net(nn.Module):
       self.features = features
       self.bn0 = ComplexBatchNorm1d(self.sequences)
       self.bn1 = BatchNorm1d(self.sequences)
-      self.bn2 = BatchNorm1d(2*self.sequences*4)
+      self.bn2 = BatchNorm1d(self.sequences)
       self.bn3 = BatchNorm1d(self.sequences)
       self.lin1 = ComplexLinear(self.features, self.features)
-      self.lstm1 = nn.LSTM(features*2, 4, 1, batch_first = True)
-      self.lstm2 = nn.LSTM(features*2, 4, 1, batch_first = True)
-      self.lin2 = nn.Linear(self.sequences*4*2, devices)
+      self.lstm1 = nn.LSTM(features, 1, 1, batch_first = True)
+      self.lstm2 = nn.LSTM(features, 1, 1, batch_first = True)
+      self.lin2 = ComplexLinear(self.sequences, self.sequences)
+      self.output_gate_lin = nn.Linear(self.sequences*2,devices)
       self.crelu = complex_relu
       self.relu = nn.ReLU()
       self.soft_out = nn.Softmax(dim = 1)
@@ -37,29 +38,36 @@ class Net(nn.Module):
       # x : batch_len X self.time X NUM_FEATURES
       #print("0",x)
       #x = self.bn0(x)
+      #print(x)
       x = self.lin1(x)
       #print("1",x)
       #x = self.relu(x)
       x = self.crelu(x)
       #print("2",x)
       #x = self.bn1(x)
-      x = torch.view_as_real(x).view((batch,sequence_len,self.features*2))
-      x1,(_,_) = self.lstm1(x)
-      x2,(_,_) = self.lstm2(x)
-      x = torch.stack((x1,x2)).reshape((2*batch,self.sequences,4))
+      #x = torch.view_as_real(x).view((batch,sequence_len,self.features*2))
+      x1 = x.real.view((batch,self.sequences,self.features))
+      x2 = x.imag.view((batch,self.sequences,self.features))
+      x1,(_,_) = self.lstm1(x1)
+      x2,(_,_) = self.lstm2(x2)
+      #x2 = torch.view_as_complex(x2)
+      x = torch.stack((x1,x2), dim = -1).squeeze()
+      x = torch.view_as_complex(x)
       #print("3",x)
-      x = torch.reshape(x, (batch, 2*self.sequences*4))
-      x = self.bn2(x)
+      #x = self.bn2(x)
       # batch X time x assets*time
       x = self.lin2(x)
+      x = self.crelu(x)
+      x = torch.view_as_real(x).reshape((batch,self.sequences*2))
+      x = self.output_gate_lin(x)
       #print("4",x)
       x = self.soft_out(x)
       return x
 
-def data_maker(seq_len, batch_size):
+def data_maker(seq_len, batch_size, num_features):
   #days = ['Day 1', 'Day 2', 'Day 3']
   #devices = ['Device 1', 'Device 2', 'Device 3']
-  days = ['Day 1']
+  days = ['Day 1', 'Day 2', 'Day 3']
   devices = ['Device 1', 'Device 2']
   raw = []
   for device in devices:
@@ -71,12 +79,15 @@ def data_maker(seq_len, batch_size):
       for file in files:
         sample = np.fromfile(file, np.complex64)
         #sample = [samp for samp in sample if cmath.isnan(samp) != True]
+        if len(sample) % (seq_len*num_features) != 0:
+          div_len = int(len(sample)/(seq_len*num_features)) * seq_len*num_features
+          sample = sample[:div_len]
         curr_device = np.concatenate((curr_device, sample))
     raw.append(curr_device)
   
   
   targets = [i for i in range(len(devices))]
-  data = DeviceDataset(raw, targets, seq_len, batch_size)
+  data = DeviceDataset(raw, targets, seq_len, batch_size, num_features)
   return data
 
 device = torch.device("cuda:0")
@@ -148,10 +159,11 @@ def train(sequence_len = 5000, epochs = 25, lr=1e-3, features = 2):
   plt.show()
   return net
 
-sequence_len = 5000
-batch_size = 40
-data = data_maker(sequence_len, batch_size)
-net = train(epochs = 10, sequence_len = sequence_len, lr = 1e-4, features = 1)
+sequence_len = 1024
+batch_size = 10
+num_features = 100
+data = data_maker(sequence_len, batch_size,num_features)
+net = train(epochs = 10, sequence_len = sequence_len, lr = 5e-4, features = num_features)
 
 
 #m = nn.BatchNorm1d(20)
