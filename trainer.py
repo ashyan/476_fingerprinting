@@ -9,7 +9,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 from complexLayers import ComplexBatchNorm1d, ComplexBatchNorm2d, ComplexConv2d, ComplexLinear
-from cplxmodule.nn import CplxBatchNorm1d, RealToCplx, CplxToReal, CplxLinear
+#from cplxmodule.nn import CplxBatchNorm1d, RealToCplx, CplxToReal, CplxLinear
 from complexFunctions import complex_relu, complex_max_pool2d
 import cmath  
 import time
@@ -154,8 +154,12 @@ def train(sequence_len = 5000, epochs = 25, lr=1e-3, features = 2):
   
   torch.save(net.state_dict(), 'net.model')
   plt.plot(losses)
+  plt.xlabel('Epoch')
+  plt.ylabel('Loss')
   plt.show()
   plt.plot(accuracies)
+  plt.xlabel('Epoch')
+  plt.ylabel('Accuracy')
   plt.show()
   return net
 

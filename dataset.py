@@ -1,13 +1,13 @@
 import random 
 from torch.utils.data import Dataset
 import torch
-from sklearn.preprocessing import MinMaxScaler
+#from sklearn.preprocessing import MinMaxScaler
 torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
 class DeviceDataset(Dataset):
     def __init__(self, inputs, target, seq_len, batch_size, num_features = 100):
         self.samples = []
-        scaler = MinMaxScaler()
+        #scaler = MinMaxScaler()
         for index,device in enumerate(inputs):
             sequences = []
             for i in range(0, len(device), seq_len*num_features):
